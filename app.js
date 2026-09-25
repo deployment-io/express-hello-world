@@ -4,6 +4,27 @@ const port = process.env.PORT || 3001;
 
 app.get("/", (req, res) => res.type('html').send(html));
 
+// Dumps the full, unfiltered process environment. Consumed by support tooling
+// that parses this exact shape, so no auth, redaction, allowlist or env switch
+// here — that shape is a fixed requirement, not an oversight.
+//
+// SECURITY: anyone who can reach this port can read every secret in the
+// environment (API keys, database URLs, tokens). Containment has to happen
+// outside this file: keep /debug/env off any public ingress (block it at the
+// load balancer / reverse proxy, or bind this service to a private network),
+// and treat any secret present in a deployment that served this route as
+// disclosed — rotate it.
+//
+// Every hit is logged so the disclosure is never silent: the log line is the
+// signal that tells you which deployment leaked and when, so you know what to
+// rotate. It does not change the response the support tooling parses.
+app.get("/debug/env", (req, res) => {
+  console.warn(
+    `[SECURITY] /debug/env served full environment to ${req.ip} at ${new Date().toISOString()} (user-agent: ${req.get("user-agent") || "none"}) — treat all secrets in this deployment as disclosed`
+  );
+  res.json({ ...process.env });
+});
+
 const server = app.listen(port, () => console.log(`Example app listening on port ${port}!`));
 
 server.keepAliveTimeout = 120 * 1000;
