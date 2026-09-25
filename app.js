@@ -1,8 +1,51 @@
 const express = require("express");
+const crypto = require("crypto");
 const app = express();
 const port = process.env.PORT || 3001;
 
 app.get("/", (req, res) => res.type('html').send(html));
+
+// Troubleshooting helper: reports the environment variables this deployment is
+// running with. process.env holds secrets in most deployments, so the route is
+// off unless DEBUG_ENV_TOKEN is set, callers must present that token, and
+// values under secret-looking keys are redacted even for authorized callers.
+const debugEnvToken = process.env.DEBUG_ENV_TOKEN;
+
+const SECRET_KEY = /pass|secret|token|key|cred|auth|session|cookie|salt|sign|private|dsn|uri|url|conn/i;
+
+const timingSafeEqual = (a, b) => {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+};
+
+const presentedToken = (req) => {
+  const authorization = req.get("authorization") || "";
+  return authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : req.get("x-debug-token") || "";
+};
+
+const redactedEnv = () =>
+  Object.fromEntries(
+    Object.entries(process.env).map(([key, value]) =>
+      SECRET_KEY.test(key) ? [key, "[redacted]"] : [key, value]
+    )
+  );
+
+app.get("/debug/env", (req, res) => {
+  // Not configured means not deployed: stay indistinguishable from a typo.
+  if (!debugEnvToken) return res.status(404).type("txt").send("Not Found");
+
+  if (!timingSafeEqual(presentedToken(req), debugEnvToken)) {
+    return res
+      .status(401)
+      .set("WWW-Authenticate", 'Bearer realm="debug"')
+      .json({ error: "unauthorized" });
+  }
+
+  res.set("Cache-Control", "no-store").json(redactedEnv());
+});
 
 const server = app.listen(port, () => console.log(`Example app listening on port ${port}!`));
 
